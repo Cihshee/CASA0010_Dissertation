@@ -10,7 +10,7 @@
 
 **Supervisor:** Dr. Roberto Murcio
 
----
+
 
 ## Abstract
 
@@ -20,22 +20,24 @@ Using a comprehensive dataset of property listings from 2017 to 2024, this study
 
 The results offer valuable evidence for policy makers and urban planners concerned with housing affordability, transport equity, and the potential for transport-induced gentrification.
 
----
+
 
 ## Repository Content
 
 This repository contains the data and R scripts used for the analysis in this dissertation. The file structure is organized as follows:
 
-- **`/data/`**: This directory contains the raw and processed data used in the study.
-  - `london_property_listings_2017_2024.csv`: The complete dataset of property listings.
+- **`root`**: This directory contains the R scripts and Python scripts for the entire analysis workflow.
+  - `data_analysis.ipynb`: for Exploratory Data Analysis (EDA).
+  - `regression-full-2024-6030.ipynb`: contains the regression modeling for the full sample dataset.
+  - `regression-common-2024-6030.ipynb`: contains the regression modeling for the common sample dataset.
+  - `basic_visual.qmd`: for generating basic, exploratory visualizations of the raw and processed data.
+  - `accessibility_common_sample_2024.qmd`: to calculating and analyzing transport accessibility metrics for the "common sample" of properties.
+  - `accessibility_full_sample_2024.qmd`: to calculating and analyzing transport accessibility metrics for the "full sample" of properties.
 
-- **`/code/`**: This directory contains the R scripts and Python scripts for the entire analysis workflow.
-  - `01_data_preprocessing.R`: Script for cleaning, preparing, and spatially joining the raw property data.
-  - `02_accessibility_calculation.R`: Script that uses the `r5r` package to calculate walking and cycling travel times from each property to the nearest underground stations.
-  - `03_quantile_regression.R`: Script for running the Quantile Regression models to analyze effects across different market segments.
-  - `04_lightgbm_model.R`: Script for training, testing, and interpreting the LightGBM machine learning model.
-  - `05_visualizations.R`: Script to generate the plots, maps, and figures used in the dissertation.
-
+- **`/data/`**: Protected and large datasets are not included here and need to be obtained from official channels. This repository only provides a subset of the processed data.
+  - `Underground_Stations_latlon.csv`
+  - `properties-with-accessibility-common-sample-2024.csv`
+  - `properties-with-accessibility-full-sample-2024.csv`
 
 - **`README.md`**: This document.
 
