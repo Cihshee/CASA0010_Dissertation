@@ -1,9 +1,13 @@
 # The Conditional Effects of Transport Accessibility on the London Rental Market
 
 **Author:** Yiyao Cui
+
 **Programme:** MSc Urban Spatial Science
-**Institution:** The Bartlett Centre for Advanced Spatial Analysis, University College London [cite: 1]
+
+**Institution:** The Bartlett Centre for Advanced Spatial Analysis, University College London
+
 **Date:** August 22, 2025
+
 **Supervisor:** Dr. Roberto Murcio
 
 ---
