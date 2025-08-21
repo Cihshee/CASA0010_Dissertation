@@ -1,0 +1,319 @@
+---
+title: "basic_visual"
+format: pdf
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Loading packages
+
+```{r}
+# install.packages('osmdata')
+# library(osmdata)   # get data from OpenStreetMap
+```
+
+```{r}
+
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(tmap)
+
+```
+
+
+## Clean data
+
+### Pre-processing: Clip oproad_gb.gpkg to oproad_London.gpkg
+
+The scope of os_roads_sf is Britain, and needs to be clipped to the London area.
+
+```{r}
+
+# 加载伦敦行政边界数据
+london_boroughs_sf <- st_read("data/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")
+
+# 加载道路数据
+os_roads_sf <- st_read("data/oproad_gb.gpkg", layer = 'road_link')
+
+```
+
+```{r}
+
+message(" Values in 'road_classification':")
+print(unique(os_roads_sf$road_classification))
+
+```
+
+```{r}
+
+# Select major roads
+main_roads_gb_sf <- os_roads_sf %>%
+  filter(road_classification %in% c('Motorway', 'A Road', 'B Road'))
+
+message(paste("Rest of roads: ", nrow(main_roads_gb_sf)))
+
+```
+
+```{r}
+
+# ------ Unify Coordinate Reference System (CRS) ------
+message("Unifying CRS...")
+london_boroughs_transformed_sf <- st_transform(london_boroughs_sf, crs = st_crs(main_roads_gb_sf))
+
+
+# ------ Spatially clip roads to London's boundary ------
+message("Clipping road network to London area...")
+london_bbox <- st_bbox(london_boroughs_transformed_sf)
+roads_subset_sf <- st_crop(main_roads_gb_sf, london_bbox)
+london_single_boundary_sf <- st_union(london_boroughs_transformed_sf)
+london_main_roads_sf <- st_intersection(roads_subset_sf, london_single_boundary_sf)
+message("Clipping complete!")
+
+
+# ------ Visualize the final result ------
+ggplot() +
+  geom_sf(data = london_boroughs_sf, fill = "gray90", color = "white") +
+  geom_sf(data = london_main_roads_sf, aes(color = form_of_way), linewidth = 0.5) +
+  labs(
+    title = "London's Major Road Network",
+    subtitle = "Motorways, A Roads, and B Roads",
+    color = "Road Class"
+  ) +
+  theme_void()
+
+```
+
+
+```{r}
+
+tmap_mode("view")
+
+tm_shape(london_boroughs_sf) +
+  tm_polygons(
+    alpha = 0.4,                 # 设置行政区的透明度
+    border.col = "white",        # 边界线颜色
+    popup.vars = c("NAME")       # 点击行政区时显示其名称
+  ) +
+  
+tm_shape(london_main_roads_sf) +
+  tm_lines(
+    col = "road_classification", # 根据道路等级赋予不同颜色
+    lwd = 1.5,                   # 线的宽度
+    palette = "viridis",         # 选择一个色板
+    title.col = "Road classification",      # 图例标题
+    popup.vars = c("name_1", "road_classification") # 点击道路时显示其名称和等级
+  ) +
+  
+tm_layout(
+    main.title = "London's Major Road Network",
+    main.title.position = "center"
+) +
+
+tm_basemap(server = "CartoDB.Positron") # 添加一个简洁的在线底图
+
+```
+
+
+```{r}
+
+# save London road network
+st_write(london_main_roads_sf, "data/oproad_london.gpkg", append = FALSE) # append=FALSE会覆盖同名旧文件
+
+```
+## Visualisation
+
+### Load zoopla data and London underground stations
+
+```{r}
+
+# 加载您的房产和站点数据
+properties_df <- read_csv("data/zoopla-rent-valid-property-london-common-sample.csv")
+stations_df <- read_csv("data/Underground_Stations_latlon.csv")
+
+# 从总数据中筛选出2024年的房产记录
+properties_2024_df <- properties_df %>%
+  filter(zoopla_year == 2024)
+
+message(paste("已筛选出", nrow(properties_2024_df), "条2024年的房产记录。"))
+
+# 将2024年的房产数据和站点数据转换为sf空间对象
+properties_2024_sf <- st_as_sf(properties_2024_df, coords = c("longitude", "latitude"), crs = 4326)
+stations_sf <- st_as_sf(stations_df, coords = c("longitude", "latitude"), crs = 4326)
+
+```
+
+### Load London boundaries and major open roads
+
+```{r}
+
+london_boroughs_sf <- st_read("data/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")
+
+london_roads_sf <- st_read("data/oproad_london.gpkg", layer = 'oproad_london')
+
+```
+### 2024 London property rent price map
+
+```{r}
+tmap_mode("view")
+
+# 创建并美化地图对象
+london_map <- tm_shape(london_boroughs_sf) +
+    tm_borders(col = "grey40", lwd = 1.5, alpha = 0.5) +  # 边界图层保持不变
+    
+    tm_shape(london_roads_sf) +
+    tm_lines(col = "grey85", alpha = 0.6, lwd = 0.5) +  # 道路颜色调得更浅，减少视觉干扰
+    
+    # 房产数据图层
+    tm_shape(properties_2024_sf) +
+    tm_dots(
+        col = "price_last",
+        palette = "YlOrRd",  # 修改为更经典的"黄-橙-红"热力图色板
+        style = "quantile",
+        n = 7, # 将颜色分为7个等级，使过渡更平滑
+        title = "2024 London Zoolpa Property Rent Price (£)", 
+        size = 0.03,
+        alpha = 0.7,
+        popup.vars = c(
+            "Property type" = "property_type",
+            "Price per week" = "price_last",
+            "Floor" = "num_floors_max",
+            "Bed" = "num_bed_max",
+            "Bathrooms" = "num_bathrooms_max"
+        )
+    ) +
+    
+    # 交通站点图层 
+    tm_shape(stations_sf) +
+    tm_dots(
+      col = "blue", # 将颜色改为蓝色，与红色热力图对比更清晰
+      size = 0.06,
+      border.col = "white",
+      border.lwd = 1.5,
+      alpha = 0.7,
+      id = "NAME",
+      popup.vars = c(
+          "Line(s)" = "LINES"
+        )
+    ) +
+    
+    # 地图布局元素
+    tm_layout(
+        main.title = "2024 London Rental Market Visualisation",
+        main.title.position = "center",
+        main.title.size = 1.2,
+        legend.outside = TRUE
+    )
+
+# 显示最终的地图
+london_map
+
+```
+
+### 2024 London Rental Market Density map
+
+```{r}
+
+# Load necessary libraries
+library(tidyverse)
+library(sf)
+library(ggplot2)
+
+# --- Data Loading and Preparation ---
+
+# Load property data
+properties_df <- read_csv("data/zoopla-rent-valid-property-london-common-sample.csv")
+
+# Filter for 2024 properties
+properties_2024_df <- properties_df %>%
+  filter(zoopla_year == 2024)
+
+# Convert 2024 property data to an sf object
+properties_2024_sf <- st_as_sf(properties_2024_df, coords = c("longitude", "latitude"), crs = 4326)
+
+# Load London boroughs boundary
+london_boroughs_sf <- st_read("data/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")
+
+# --- Hexbin Map Creation ---
+
+# 1. Prepare spatial data with a projected CRS (EPSG:27700)
+# Unified London boundary for grid generation
+london_boundary_proj <- st_transform(st_union(london_boroughs_sf), crs = 27700)
+# Property points
+properties_2024_proj <- st_transform(properties_2024_sf, crs = 27700)
+# --- NEW: Transform the individual boroughs boundary data as well ---
+london_boroughs_proj <- st_transform(london_boroughs_sf, crs = 27700)
+
+
+# 2. Generate hexagonal grid (No changes here)
+hex_grid <- st_make_grid(london_boundary_proj, cellsize = 1000, square = FALSE)
+hex_grid_sf <- st_sf(geometry = hex_grid) %>%
+  mutate(hex_id = row_number())
+
+# 3. Join, summarize, and cap data (No changes here, already updated to 1500)
+points_in_hex <- st_join(properties_2024_proj, hex_grid_sf, join = st_within)
+
+hex_summary <- points_in_hex %>%
+  st_drop_geometry() %>%
+  filter(!is.na(hex_id)) %>%
+  group_by(hex_id) %>%
+  summarise(
+    avg_price = mean(price_last, na.rm = TRUE),
+    property_count = n()
+  ) %>%
+  mutate(
+    avg_price = if_else(avg_price > 1500, 1500, avg_price)
+  )
+
+hex_grid_summary <- hex_grid_sf %>%
+  left_join(hex_summary, by = "hex_id")
+
+final_hex_map_data <- hex_grid_summary %>%
+  filter(!is.na(avg_price)) %>%
+  st_intersection(london_boundary_proj)
+
+
+# --- Plotting the static map with ggplot2 ---
+
+ggplot() +
+  # 1. Hexagon layer (at the bottom)
+  geom_sf(data = final_hex_map_data, aes(fill = avg_price), color = "white", lwd = 0.1) +
+  
+  # 2. Scale for the fill color
+  scale_fill_viridis_c(
+    name = "Average Weekly Rent (£)",
+    option = "plasma",
+    direction = -1,
+    na.value = "grey85",
+    breaks = c(500, 1000, 1500),
+    labels = c("£500", "£1,000", "£1,500+"),
+    limits = c(NA, 1500)
+  ) +
+  
+  # --- MODIFIED: Draw two separate boundary layers ---
+  
+  # 3. Inner Boroughs Layer: Draw all borough boundaries with a thin grey line first.
+  geom_sf(data = london_boroughs_proj, fill = NA, color = "grey60", lwd = 0.2) +
+  
+  # 4. Outer Boundary Layer: Draw the unified outer boundary ON TOP with a thicker black line.
+  geom_sf(data = london_boundary_proj, fill = NA, color = "black", lwd = 0.4) +
+  
+  # 5. Labels and theme
+  labs(
+    title = "2024 London Rental Market Density",
+    subtitle = "Average weekly rent price per hexagonal area (1km), capped at £1,500"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 12),
+    legend.position = "right"
+  )
+
+```
+
+
+

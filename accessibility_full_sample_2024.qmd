@@ -1,0 +1,248 @@
+---
+title: "accessibility-full-sample-2024"
+format: pdf
+editor: visual
+---
+
+## Calculate the accessibility of each property to the nearest station (R5R)
+
+### Loading packages
+
+```{r}
+# install.packages("r5r")
+```
+
+```{r}
+# Allocate 4 GB of RAM to Java (MUST BE FIRST)
+options(java.parameters = "-Xmx4G")
+```
+
+```{r}
+
+library(r5r)
+library(sf)
+library(dplyr)
+library(tidyverse)
+
+```
+
+```{r}
+
+# Check what functions are in the r5r package
+ls("package:r5r")
+
+```
+
+### load data
+
+```{r}
+# load property data and station data
+properties_2024_df <- read_csv("data/zoopla-rent-valid-property-london-full-sample-2024.csv") %>%
+  # --- 修改: 在这里就将property_id转换为字符型，确保后续操作类型一致 ---
+  mutate(property_id = as.character(property_id))
+
+stations_df <- read_csv("data/Underground_Stations_latlon.csv")
+
+```
+
+### calculate accessibility
+
+```{r}
+# Prepare Origin and Destination Points
+# Origins: Property data
+origins <- properties_2024_df %>%
+  select(
+    id = property_id,
+    lon = longitude,
+    lat = latitude
+  )
+
+# Prepare Destinations: Unique station data
+stations_unique_df <- stations_df %>%
+  distinct(NAME, .keep_all = TRUE)
+
+
+# Rename the columns for the destinations data frame as well
+destinations <- stations_unique_df %>%
+  select(
+    id = NAME,
+    lon = longitude,
+    lat = latitude 
+  )
+```
+
+```{r}
+
+# 定义您的OSM pbf文件路径
+osm_path <- "data/routing/" 
+
+# 定义出发时间
+departure_time <- as.POSIXct("2025-08-01 10:00:00", format = "%Y-%m-%d %H:%M:%S")
+
+# --- 1. 创建路网核心对象 ---
+message("Building routing core with setup_r5(). This may take a few minutes...")
+r5r_core <- setup_r5(data_path = osm_path, verbose = FALSE)
+message("Routing core built successfully.")
+
+
+```
+
+```{r}
+
+# --- 2. 计算步行可达性，并记录最近站点信息 ---
+message("Calculating walking accessibility with station details...")
+
+ttm_walk <- travel_time_matrix(
+    r5r_core = r5r_core,
+    origins = origins,
+    destinations = destinations,
+    mode = "WALK",
+    departure_datetime = departure_time,
+    max_trip_duration = 60,
+    verbose = FALSE
+)
+
+# 使用 slice_min() 找到每个房产对应的最近地铁站的完整记录
+walk_accessibility_details <- ttm_walk %>%
+  group_by(from_id) %>%
+  # 关键步骤: 找到 travel_time_p50 最小的那一行
+  slice_min(order_by = travel_time_p50, n = 1, with_ties = FALSE) %>%
+  ungroup() %>% # 完成分组操作后取消分组
+  # 将 to_id (即站点NAME) 与原始站点数据连接，以获取线路信息
+  left_join(
+    stations_unique_df %>% select(NAME, LINES), # 只选择需要的列
+    by = c("to_id" = "NAME")
+    ) %>%
+  # 重命名列，使其在最终表格中更具可读性
+  rename(
+    walk_time_to_nearest_station = travel_time_p50,
+    nearest_station_name = to_id,
+    nearest_station_lines = LINES
+  )
+
+message("Walking accessibility details captured.")
+# 查看一下新生成的数据框结构
+head(walk_accessibility_details)
+
+
+```
+
+```{r}
+
+# --- 3. 计算骑行可达性 (加入性能优化) ---
+message("Calculating bicycling accessibility...")
+
+ttm_bike <- travel_time_matrix(
+    r5r_core = r5r_core,
+    origins = origins,
+    destinations = destinations,
+    mode = "BICYCLE",
+    departure_datetime = departure_time,
+    max_trip_duration = 30,    # <-- 修改/新增: 限制最大骑行时间为30分钟，这是关键的性能优化
+    verbose = FALSE
+)
+
+bike_accessibility <- ttm_bike %>%
+  group_by(from_id) %>%
+  summarise(bike_time_to_nearest_station = min(travel_time_p50, na.rm = TRUE))
+
+message("Accessibility calculation complete!")
+
+```
+
+```{r}
+head(ttm_walk)
+head(walk_accessibility_details)
+
+head(ttm_bike)
+head(bike_accessibility)
+```
+
+```{r}
+# 计算完成后，可以调用 stop_r5() 来释放内存
+stop_r5()
+message("R5 Java process stopped.")
+```
+
+```{r}
+
+# --- 4. 合并结果并查看 (此部分逻辑不变，仅调整合并的数据源) ---
+properties_with_accessibility <- properties_2024_df %>%
+  # 首先合并带有详细步行信息的表格
+  left_join(walk_accessibility_details, by = c("property_id" = "from_id")) %>%
+  # 然后合并骑行时间的表格
+  left_join(bike_accessibility, by = c("property_id" = "from_id"))
+
+print("Final property data with detailed accessibility times:")
+# 使用 print() 并指定 n 来查看更多行，或使用 View()
+print(properties_with_accessibility, n = 10)
+
+message("All calculations and merging complete!")
+
+```
+
+```{r}
+
+# --- 5. 统计NA值的数量和比例 ---
+message("Summarizing NA counts and proportions...")
+
+# 假设 properties_with_accessibility 数据框已经存在
+na_summary <- properties_with_accessibility %>%
+  summarise(
+    # 1. 计算总的房产数量
+    total_properties = n(),
+    
+    # 2. 计算步行时间为NA的数量
+    walk_na_count = sum(is.na(walk_time_to_nearest_station)),
+    
+    # 3. 计算骑行时间为NA的数量
+    bike_na_count = sum(is.na(bike_time_to_nearest_station)),
+    
+    # 4. 计算两者同时为NA的数量
+    both_na_count = sum(is.na(walk_time_to_nearest_station) & is.na(bike_time_to_nearest_station))
+  ) %>%
+  # 使用上面的计算结果来创建比例列
+  mutate(
+    walk_na_proportion = (walk_na_count / total_properties),
+    bike_na_proportion = (bike_na_count / total_properties),
+    both_na_proportion = (both_na_count / total_properties)
+  )
+
+# 打印出这个总结性的数据框
+print(na_summary)
+
+```
+
+```{r}
+
+# --- 6. 移除包含NA的记录并保存结果 ---
+message("Filtering out records with NA accessibility and saving to CSV...")
+
+# 检查并打印原始数据框的行数，以便对比
+original_rows <- nrow(properties_with_accessibility)
+message(paste("Original number of properties:", original_rows))
+
+# 使用 tidyr::drop_na() 移除在指定列中任意一个为NA的行
+# 这会创建一个新的、不含NA值的数据框
+properties_complete <- properties_with_accessibility %>%
+  drop_na(walk_time_to_nearest_station, bike_time_to_nearest_station)
+
+# 检查并打印过滤后的数据框行数
+filtered_rows <- nrow(properties_complete)
+message(paste("Number of properties after filtering:", filtered_rows))
+message(paste("Number of properties removed:", original_rows - filtered_rows))
+
+# 定义文件路径
+output_path <- "data/properties-with-accessibility-full-sample-2024.csv"
+
+# 使用 readr::write_csv() 将清理后的数据保存到CSV文件
+# write_csv 是 tidyverse 的一部分，比基础R的 write.csv 更推荐使用
+write_csv(properties_complete, output_path)
+
+message(paste("Filtered data successfully saved to:", output_path))
+
+# (可选) 查看一下清理后数据的前几行，确认NA已消失
+print("--- Preview of the filtered data ---")
+head(properties_complete)
+
+```
